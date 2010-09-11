@@ -1,0 +1,72 @@
+Name:                dsmp
+Version:             0.0
+Description:         Darnest's SMP server
+Author:              Darnest
+Build-Type:          Simple
+Cabal-Version:       >=1.2
+
+Executable dsmp
+  Main-is:           Main.hs
+  extensions:        UndecidableInstances,
+                     RankNTypes,
+                     PatternGuards
+                     
+  ghc-options:       
+  build-depends:     base >= 4.2.0.2,
+                     network >= 2.2.1.7,
+                     bytestring >= 0.9.1.6,
+                     judy >= 0.2.2,
+                     utf8-string >= 0.3,
+                     AC-Vector >= 2.3.1,
+                     mtl >= 1.1.0.2,
+                     containers,
+                     HTTP,
+                     MaybeT >= 0.1.2,
+                     zlib >= 0.5.2.0,
+                     binary >= 0.5.0.2,
+                     data-binary-ieee754 >= 0.4.1
+
+Executable dsmpclient
+  Main-is:           TestClient.hs
+  extensions:        UndecidableInstances,
+                     RankNTypes,
+                     PatternGuards
+                     
+  ghc-options:       
+  build-depends:     base >= 4.2.0.2,
+                     network >= 2.2.1.7,
+                     bytestring >= 0.9.1.6,
+                     judy >= 0.2.2,
+                     utf8-string >= 0.3,
+                     AC-Vector >= 2.3.1,
+                     mtl >= 1.1.0.2,
+                     containers >= 0.3.0.0,
+                     HTTP >= 4000.0.9,
+                     MaybeT >= 0.1.2,
+                     zlib >= 0.5.2.0,
+                     binary >= 0.5.0.2,
+                     data-binary-ieee754 >= 0.4.1,
+                     random >= 1.0.0.2
+
+Executable nbtparser
+  Main-is:           NBTParser.hs
+  extensions:        UndecidableInstances,
+                     RankNTypes,
+                     PatternGuards
+                     
+  ghc-options:       
+  build-depends:     base >= 4.2.0.2,
+                     network >= 2.2.1.7,
+                     bytestring >= 0.9.1.6,
+                     judy >= 0.2.2,
+                     utf8-string >= 0.3,
+                     AC-Vector >= 2.3.1,
+                     mtl >= 1.1.0.2,
+                     containers >= 0.3.0.0,
+                     HTTP >= 4000.0.9,
+                     MaybeT >= 0.1.2,
+                     zlib >= 0.5.2.0,
+                     binary >= 0.5.0.2,
+                     data-binary-ieee754 >= 0.4.1,
+                     random >= 1.0.0.2
+
