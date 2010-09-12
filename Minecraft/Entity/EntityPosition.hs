@@ -7,6 +7,7 @@ module Minecraft.Entity.EntityPosition
 	) where
 import Data.Vector.V3
 import Minecraft.Map
+import Data.Maybe
 
 data EntityPosition
 	= EntityPosition
@@ -18,7 +19,7 @@ data EntityPosition
 
 entityPositionMapBlockVector :: EntityPosition -> MapBlockVector
 entityPositionMapBlockVector EntityPosition {entityPositionVector = positionVec} = 
-	mapBlockVector (floor $ v3x positionVec) (floor $ v3y positionVec) (floor $ v3z positionVec)
+	fromJust $ mapBlockVector (floor $ v3x positionVec) (floor $ v3y positionVec) (floor $ v3z positionVec)
 
 entityPositionX :: EntityPosition -> Double
 entityPositionX = v3x . entityPositionVector

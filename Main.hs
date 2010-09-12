@@ -3,6 +3,7 @@ module Main
 	) where
 import Minecraft.Network.Server
 import Network (PortID (..))
+import Control.Monad
 
 main = do
 	putStrLn "starting server..."

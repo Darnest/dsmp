@@ -34,6 +34,7 @@ import Control.Concurrent.StoppableChan
 import Control.Monad
 import System.IO.Unsafe (unsafeInterleaveIO)
 import Control.Monad.Trans
+import Data.Maybe
 
 type ClientAction a = ClientActionT IO a
 
@@ -209,16 +210,18 @@ authenticateClient serverId client = do
 	return PlayerClient
 		{ playerClientPlayer = Player
 			{ playerUsername = username
+			, playerHeldItem = Nothing
 			}
 		, playerClientClient = client
 		}
 
 sendMapChunk :: PlayerWorldClient -> MapChunkVector -> ClientAction ()
 sendMapChunk PlayerWorldClient
-	{ playerWorldClientWorld = world
+	{ playerWorldClientWorld = world@World
+		{ worldMap = minecraftMap
+		}
 	, playerWorldClientClient = client
 	} v = do
-		let minecraftMap = worldMap world
 		let
 			x = mapChunkVectorX v
 			z = mapChunkVectorZ v
@@ -263,7 +266,7 @@ sendClientWorld world@World
 			, ServerPacket.playerSpawnY = mapBlockVectorY blockVector
 			, ServerPacket.playerSpawnZ = mapBlockVectorZ blockVector
 			}
-		sendMapChunk playerWorldClient (mapChunkVector 0 0 0)
+		sendMapChunk playerWorldClient (fromJust $ mapChunkVector 0 0)
 		sendPacket client ServerPacket.PlayerPositionLook
 			{ ServerPacket.playerPositionLookX = entityX playerEntity
 			, ServerPacket.playerPositionLookY = entityY playerEntity

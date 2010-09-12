@@ -27,11 +27,11 @@ import Data.Vector.V3
 import Control.Concurrent.MVar
 import Data.Word
 import Data.Int
-import Data.Map (Map)
-import qualified Data.Map as Map
+import Data.IntMap (IntMap)
+import qualified Data.IntMap as IntMap
 import Data.Maybe
 
-type EntityMap v = Map Word32 v
+type EntityMap v = IntMap v
 
 data World = World
 	{ worldAnyEntities :: MVar (EntityMap AnyEntity)
@@ -62,8 +62,8 @@ addWorldPlayer world@World
 		let anyEntity = toAnyEntity playerEntity
 		anyEntities <- takeMVar mAnyEntities
 		playerEntities <- takeMVar mPlayerEntities
-		putMVar mAnyEntities (Map.insert entityId anyEntity anyEntities)
-		putMVar mPlayerEntities (Map.insert entityId playerEntity playerEntities)
+		putMVar mAnyEntities (IntMap.insert (fromIntegral entityId) anyEntity anyEntities)
+		putMVar mPlayerEntities (IntMap.insert (fromIntegral entityId) playerEntity playerEntities)
 		return playerEntity
 
 addWorldMob :: World -> Mob -> EntityPosition -> IO MobEntity
@@ -80,8 +80,8 @@ addWorldMob world@World
 		let anyEntity = toAnyEntity mobEntity
 		anyEntities <- takeMVar mAnyEntities
 		mobEntities <- takeMVar mMobEntities
-		putMVar mAnyEntities (Map.insert entityId anyEntity anyEntities)
-		putMVar mMobEntities (Map.insert entityId mobEntity mobEntities)
+		putMVar mAnyEntities (IntMap.insert (fromIntegral entityId) anyEntity anyEntities)
+		putMVar mMobEntities (IntMap.insert (fromIntegral entityId) mobEntity mobEntities)
 		return mobEntity
 
 addWorldItem :: World -> Item -> EntityPosition -> IO ItemEntity
@@ -98,8 +98,8 @@ addWorldItem world@World
 		let anyEntity = toAnyEntity itemEntity
 		anyEntities <- takeMVar mAnyEntities
 		itemEntities <- takeMVar mItemEntities
-		putMVar mAnyEntities (Map.insert entityId anyEntity anyEntities)
-		putMVar mItemEntities (Map.insert entityId itemEntity itemEntities)
+		putMVar mAnyEntities (IntMap.insert (fromIntegral entityId) anyEntity anyEntities)
+		putMVar mItemEntities (IntMap.insert (fromIntegral entityId) itemEntity itemEntities)
 		return itemEntity
 
 addWorldObject :: World -> Object -> EntityPosition -> IO ObjectEntity
@@ -116,8 +116,8 @@ addWorldObject world@World
 		let anyEntity = toAnyEntity objectEntity
 		anyEntities <- takeMVar mAnyEntities
 		objectEntities <- takeMVar mObjectEntities
-		putMVar mAnyEntities (Map.insert entityId anyEntity anyEntities)
-		putMVar mObjectEntities (Map.insert entityId objectEntity objectEntities)
+		putMVar mAnyEntities (IntMap.insert (fromIntegral entityId) anyEntity anyEntities)
+		putMVar mObjectEntities (IntMap.insert (fromIntegral entityId) objectEntity objectEntities)
 		return objectEntity
 
 worldPlayerSpawn :: World -> Player -> IO EntityPosition
@@ -141,24 +141,24 @@ addWorldEntity World
 	} entity = do
 	anyEntities <- takeMVar mAnyEntities
 	let i = (entityId entity)
-	let putAny = putMVar mAnyEntities (Map.insert i entity anyEntities)
+	let putAny = putMVar mAnyEntities (IntMap.insert (fromIntegral i) entity anyEntities)
 	case toAnyEntity entity of
 		(AnyEntityPlayer playerEntity) -> do
 			playerEntities <- takeMVar mPlayerEntities
 			putAny
-			putMVar mPlayerEntities (Map.insert i playerEntity playerEntities)
+			putMVar mPlayerEntities (IntMap.insert (fromIntegral i) playerEntity playerEntities)
 		(AnyEntityMob mobEntity) -> do
 			mobEntities <- takeMVar mMobEntities
 			putAny
-			putMVar mMobEntities (Map.insert i mobEntity mobEntities)
+			putMVar mMobEntities (IntMap.insert (fromIntegral i) mobEntity mobEntities)
 		(AnyEntityItem itemEntity) -> do
 			itemEntities <- takeMVar mItemEntities
 			putAny
-			putMVar mItemEntities (Map.insert i itemEntity itemEntities)
+			putMVar mItemEntities (IntMap.insert (fromIntegral i) itemEntity itemEntities)
 		(AnyEntityObject objectEntity) -> do
 			objectEntities <- takeMVar mObjectEntities
 			putAny
-			putMVar mObjectEntities (Map.insert i objectEntity objectEntities)
+			putMVar mObjectEntities (IntMap.insert (fromIntegral i) objectEntity objectEntities)
 -}
 removeWorldEntity :: Entity entity => World -> entity -> IO ()
 removeWorldEntity World
@@ -170,57 +170,57 @@ removeWorldEntity World
 	} entity = do
 	anyEntities <- takeMVar mAnyEntities
 	let i = (entityId entity)
-	let putAny = putMVar mAnyEntities (Map.delete i anyEntities)
+	let putAny = putMVar mAnyEntities (IntMap.delete (fromIntegral i) anyEntities)
 	case toAnyEntity entity of
 		(AnyEntityPlayer _) -> do
 			playerEntities <- takeMVar mPlayerEntities
 			putAny
-			putMVar mPlayerEntities (Map.delete i playerEntities)
+			putMVar mPlayerEntities (IntMap.delete (fromIntegral i) playerEntities)
 		(AnyEntityMob _) -> do
 			mobEntities <- takeMVar mMobEntities
 			putAny
-			putMVar mMobEntities (Map.delete i mobEntities)
+			putMVar mMobEntities (IntMap.delete (fromIntegral i) mobEntities)
 		(AnyEntityItem _) -> do
 			itemEntities <- takeMVar mItemEntities
 			putAny
-			putMVar mItemEntities (Map.delete i itemEntities)
+			putMVar mItemEntities (IntMap.delete (fromIntegral i) itemEntities)
 		(AnyEntityObject _) -> do
 			objectEntities <- takeMVar mObjectEntities
 			putAny
-			putMVar mObjectEntities (Map.delete i objectEntities)
+			putMVar mObjectEntities (IntMap.delete (fromIntegral i) objectEntities)
 
 lookupWorldEntity :: World -> Word32 -> IO (Maybe AnyEntity)
 lookupWorldEntity World {worldAnyEntities = mAnyEntities} i = do
 	anyEntities <- readMVar mAnyEntities
-	return (Map.lookup i anyEntities)
+	return (IntMap.lookup (fromIntegral i) anyEntities)
 
 lookupWorldPlayerEntity :: World -> Word32 -> IO (Maybe PlayerEntity)
 lookupWorldPlayerEntity World {worldPlayerEntities = mPlayerEntities} i = do
 	playerEntities <- readMVar mPlayerEntities
-	return (Map.lookup i playerEntities)
+	return (IntMap.lookup (fromIntegral i) playerEntities)
 
 lookupWorldMobEntity :: World -> Word32 -> IO (Maybe MobEntity)
 lookupWorldMobEntity World {worldMobEntities = mMobEntities} i = do
 	mobEntities <- readMVar mMobEntities
-	return (Map.lookup i mobEntities)
+	return (IntMap.lookup (fromIntegral i) mobEntities)
 
 lookupWorldItemEntity :: World -> Word32 -> IO (Maybe ItemEntity)
 lookupWorldItemEntity World {worldItemEntities = mItemEntities} i = do
 	itemEntities <- readMVar mItemEntities
-	return (Map.lookup i itemEntities)
+	return (IntMap.lookup (fromIntegral i) itemEntities)
 
 lookupWorldObjectEntity :: World -> Word32 -> IO (Maybe ObjectEntity)
 lookupWorldObjectEntity World {worldObjectEntities = mObjectEntities} i = do
 	objectEntities <- readMVar mObjectEntities
-	return (Map.lookup i objectEntities)
+	return (IntMap.lookup (fromIntegral i) objectEntities)
 
 newWorld :: IO World
 newWorld = do
-	entities <- newMVar Map.empty
-	players <- newMVar Map.empty
-	mobs <- newMVar Map.empty
-	items <- newMVar Map.empty
-	objects <- newMVar Map.empty
+	entities <- newMVar IntMap.empty
+	players <- newMVar IntMap.empty
+	mobs <- newMVar IntMap.empty
+	items <- newMVar IntMap.empty
+	objects <- newMVar IntMap.empty
 	minecraftMap <- newMinecraftMap
 	idGen <- newMVar newEntityIdGenerator
 	return World

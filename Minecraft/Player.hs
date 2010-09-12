@@ -7,6 +7,6 @@ import Minecraft.Item
 data Player
 	= Player
 		{ playerUsername :: String
-		, playerHeldItem :: Item
+		, playerHeldItem :: Maybe Item
 		}
 	deriving (Show, Eq)
