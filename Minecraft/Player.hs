@@ -1,12 +1,29 @@
 module Minecraft.Player
 	( Player (..)
+	, PlayerDigStatus (..)
 	) where
-import Data.ByteString as BS
 import Minecraft.Item
+import Minecraft.Player.Inventory
+import Minecraft.Map
+import Minecraft.Block (Block)
+
+import Data.Time.Clock
+import Data.ByteString as BS
 
 data Player
 	= Player
 		{ playerUsername :: String
 		, playerHeldItem :: Maybe Item
+		, playerInventory :: PlayerInventory
+		, playerDigStatus :: PlayerDigStatus
 		}
-	deriving (Show, Eq)
+	deriving (Eq)
+
+data PlayerDigStatus
+	= PlayerNotDigging
+	| PlayerDigging
+		{ playerDiggingPlace :: MapBlockVector
+		, playerDiggingBlock :: Block
+		, playerDiggingStartTime :: UTCTime
+		}
+	deriving (Eq)

@@ -22,6 +22,8 @@ module Minecraft.Entity
 	, entityPitch
 	, entityBoundingBox
 	, entityPositionMapBlockVector
+	, entityPositionMapChunkVector
 	, entityMapBlockVector
+	, entityMapChunkVector
 	) where
 import Minecraft.Entity.Internal

@@ -56,14 +56,14 @@ data ClientPacket
 		, digX :: Int32
 		, digY :: Int8
 		, digZ :: Int32
-		, unknown1 :: Int8
+		, digBlockDirection :: BlockDirection
 		}
 	| Place
 		{ placeBlockType :: Word16
 		, placeX :: Int32
 		, placeY :: Int8
 		, placeZ :: Int32
-		, direction :: BlockDirection
+		, placeDirection :: BlockDirection
 		}
 	| HoldItem
 		{ entityId :: Word32
@@ -158,8 +158,8 @@ instance Packet ClientPacket where
 		x <- Get.getWord32be
 		y <- Get.getWord8
 		z <- Get.getWord32be
-		unk1 <- Get.getWord8
-		return (Dig status (fromIntegral x) (fromIntegral y) (fromIntegral z) (fromIntegral unk1))
+		direction <- getBlockDirection
+		return (Dig status (fromIntegral x) (fromIntegral y) (fromIntegral z) direction)
 	
 	getPacketContents 0x0F = do
 		itemType <- Get.getWord16be

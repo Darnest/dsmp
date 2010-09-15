@@ -12,6 +12,11 @@ module Minecraft.World
 	, lookupWorldMobEntity
 	, lookupWorldItemEntity
 	, lookupWorldObjectEntity
+	, updateWorldEntity
+	, updateWorldPlayerEntity
+	, updateWorldMobEntity
+	, updateWorldItemEntity
+	, updateWorldObjectEntity
 	) where
 import Minecraft.Entity
 import Minecraft.Entity.EntityId
@@ -42,6 +47,76 @@ data World = World
 	, worldEntityIdGenerator :: MVar EntityIdGenerator
 	, worldMap :: MinecraftMap
 	}
+
+updateWorldPlayerEntity :: World -> PlayerEntity -> IO ()
+updateWorldPlayerEntity
+	World
+		{ worldAnyEntities = mAnyEntities
+		, worldPlayerEntities = mPlayerEntities
+		}
+	playerEntity@PlayerEntity
+		{ playerEntityId = eid
+		}
+	= do
+		anyEntities <- takeMVar mAnyEntities
+		playerEntities <- takeMVar mPlayerEntities
+		putMVar mPlayerEntities (IntMap.insert (fromIntegral eid) playerEntity playerEntities)
+		putMVar mAnyEntities (IntMap.insert (fromIntegral eid) (AnyEntityPlayer playerEntity) anyEntities)
+
+updateWorldMobEntity :: World -> MobEntity -> IO ()
+updateWorldMobEntity
+	World
+		{ worldAnyEntities = mAnyEntities
+		, worldMobEntities = mMobEntities
+		}
+	mobEntity@MobEntity
+		{ mobEntityId = eid
+		}
+	= do
+		anyEntities <- takeMVar mAnyEntities
+		mobEntities <- takeMVar mMobEntities
+		putMVar mMobEntities (IntMap.insert (fromIntegral eid) mobEntity mobEntities)
+		putMVar mAnyEntities (IntMap.insert (fromIntegral eid) (AnyEntityMob mobEntity) anyEntities)
+
+updateWorldItemEntity :: World -> ItemEntity -> IO ()
+updateWorldItemEntity
+	World
+		{ worldAnyEntities = mAnyEntities
+		, worldItemEntities = mItemEntities
+		}
+	itemEntity@ItemEntity
+		{ itemEntityId = eid
+		}
+	= do
+		anyEntities <- takeMVar mAnyEntities
+		itemEntities <- takeMVar mItemEntities
+		putMVar mItemEntities (IntMap.insert (fromIntegral eid) itemEntity itemEntities)
+		putMVar mAnyEntities (IntMap.insert (fromIntegral eid) (AnyEntityItem itemEntity) anyEntities)
+
+
+updateWorldObjectEntity :: World -> ObjectEntity -> IO ()
+updateWorldObjectEntity
+	World
+		{ worldAnyEntities = mAnyEntities
+		, worldObjectEntities = mObjectEntities
+		}
+	objectEntity@ObjectEntity
+		{ objectEntityId = eid
+		}
+	= do
+		anyEntities <- takeMVar mAnyEntities
+		objectEntities <- takeMVar mObjectEntities
+		putMVar mObjectEntities (IntMap.insert (fromIntegral eid) objectEntity objectEntities)
+		putMVar mAnyEntities (IntMap.insert (fromIntegral eid) (AnyEntityObject objectEntity) anyEntities)
+
+
+updateWorldEntity :: Entity entity => World -> entity -> IO ()
+updateWorldEntity world entity = do
+	case toAnyEntity entity of
+		(AnyEntityPlayer e) -> updateWorldPlayerEntity world e
+		(AnyEntityMob e) -> updateWorldMobEntity world e
+		(AnyEntityItem e) -> updateWorldItemEntity world e
+		(AnyEntityObject e) -> updateWorldObjectEntity world e
 
 generateWorldEntityId :: World -> IO Word32
 generateWorldEntityId World {worldEntityIdGenerator = mEntityIdGen} =
@@ -123,9 +198,9 @@ addWorldObject world@World
 worldPlayerSpawn :: World -> Player -> IO EntityPosition
 worldPlayerSpawn _ _ = return EntityPosition
 	{ entityPositionVector = Vector3
-		{ v3x = 0
-		, v3y = 64
-		, v3z = 0
+		{ v3x = 10
+		, v3y = 20
+		, v3z = 10
 		}
 	, entityPositionRotation = 0
 	, entityPositionPitch = 0

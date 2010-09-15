@@ -24,7 +24,9 @@ Executable dsmp
                      MaybeT >= 0.1.2,
                      zlib >= 0.5.2.0,
                      binary >= 0.5.0.2,
-                     data-binary-ieee754 >= 0.4.1
+                     data-binary-ieee754 >= 0.4.1,
+                     array >= 0.3.0.1,
+                     time >= 1.1.4
 
 Executable dsmpclient
   Main-is:           TestClient.hs
@@ -46,7 +48,9 @@ Executable dsmpclient
                      zlib >= 0.5.2.0,
                      binary >= 0.5.0.2,
                      data-binary-ieee754 >= 0.4.1,
-                     random >= 1.0.0.2
+                     random >= 1.0.0.2,
+                     array >= 0.3.0.1,
+                     time >= 1.1.4
 
 Executable nbtparser
   Main-is:           NBTParser.hs
@@ -68,5 +72,6 @@ Executable nbtparser
                      zlib >= 0.5.2.0,
                      binary >= 0.5.0.2,
                      data-binary-ieee754 >= 0.4.1,
-                     random >= 1.0.0.2
-
+                     random >= 1.0.0.2,
+                     array >= 0.3.0.1,
+                     time >= 1.1.4

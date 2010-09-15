@@ -18,7 +18,9 @@ module Minecraft.Entity.Internal
 	, entityPitch
 	, entityBoundingBox
 	, entityPositionMapBlockVector
+	, entityPositionMapChunkVector
 	, entityMapBlockVector
+	, entityMapChunkVector
 	) where
 import Minecraft.Entity.EntityId
 import Minecraft.Entity.EntityPosition
@@ -64,6 +66,9 @@ entityPitch = entityPositionPitch . entityPosition
 entityMapBlockVector :: Entity entity => entity -> MapBlockVector
 entityMapBlockVector = entityPositionMapBlockVector . entityPosition
 
+entityMapChunkVector :: Entity entity => entity -> MapChunkVector
+entityMapChunkVector = entityPositionMapChunkVector . entityPosition
+
 entityBoundingBox :: Entity entity => entity -> BBox3
 entityBoundingBox entity
 	| Vector3
@@ -89,7 +94,7 @@ data AnyEntity
 	| AnyEntityMob MobEntity
 	| AnyEntityItem ItemEntity
 	| AnyEntityObject ObjectEntity
-	deriving (Eq, Show)
+	deriving (Eq)
 
 fmapAnyEntity :: (forall entity. Entity entity => entity -> a) -> AnyEntity -> a
 fmapAnyEntity f (AnyEntityPlayer entity) = f entity
@@ -110,7 +115,7 @@ data PlayerEntity = PlayerEntity
 	, playerEntityPosition :: EntityPosition
 	, playerEntityPlayer :: Player
 	}
-	deriving (Show, Eq)
+	deriving (Eq)
 
 instance Entity PlayerEntity where
 	entityPosition = playerEntityPosition

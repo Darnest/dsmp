@@ -15,13 +15,18 @@ hSendPacket h packet = do
 	hPutPacket h packet
 
 main = do
-	let hostname = "localhost"
-	let port = 25565
-	let username = "Ungoliant"
+	putStr "server: "
+	hostname <- getLine
+	putStr "port: "
+	portStr <- getLine
+	putStr "username"
+	username <- getLine
+	
+	let port = read portStr :: Int
 	
 	putStrLn "Connecting to server..."
 	
-	handle <- connectTo hostname (PortNumber port)
+	handle <- connectTo hostname (PortNumber (fromIntegral port))
 	hSetBuffering handle NoBuffering
 	let sendPacket = hSendPacket handle
 	

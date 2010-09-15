@@ -24,6 +24,7 @@ module Minecraft.Map
 	, setMapBlock
 	, newMinecraftMap
 	, getMapChunk
+	, mapBlockVectorToChunkVector
 	) where
 import Data.Judy (JudyL, JE)
 import Minecraft.Block
@@ -34,21 +35,21 @@ import Data.Word
 import Data.Int
 import Data.Bits
 import Data.Maybe
+import Debug.Trace
 
-newtype MapBlockVector = MapBlockVector Word
+data MapBlockVector = MapBlockVector Int32 Int32 Int32
 	deriving (Eq, Show)
 
 instance Num MapBlockVector where
-	(MapBlockVector w1) + (MapBlockVector w2) = MapBlockVector $ w1 + w2
-						
-	(MapBlockVector w1) - (MapBlockVector w2) = MapBlockVector $ w1 - w2
+	(MapBlockVector x1 y1 z1) + (MapBlockVector x2 y2 z2) = MapBlockVector (x1 + x2) (y1 + y2) (z1 + z2)
+	(MapBlockVector x1 y1 z1) - (MapBlockVector x2 y2 z2) = MapBlockVector (x1 - x2) (y1 - y2) (z1 - z2)
 	_ * _ = undefined
 	negate = undefined
 	abs = undefined
 	signum = undefined
 	fromInteger = undefined
 
-newtype MapChunkVector = MapChunkVector Word
+newtype MapChunkVector = MapChunkVector MapBlockVector
 	deriving (Eq, Show)
 
 instance Num MapChunkVector where
@@ -73,7 +74,7 @@ blocksInWord :: Integral a => a
 blocksInWord = bytesInWord `quot` mapBlockSize
 
 bytesInWord :: Integral a => a
-bytesInWord = fromIntegral (log256 maxBound :: Word)
+bytesInWord = fromIntegral (log256 (fromIntegral (maxBound :: Word) + 1 :: Integer))
 	where
 		log256h 0 i = i - 1
 		log256h 1 i = i
@@ -92,14 +93,19 @@ mapMinVectorY :: Int32
 mapMinVectorY = 0
 
 maxWordAbsHorizontal :: Word
-maxWordAbsHorizontal = floor $ sqrt $ fromIntegral $ (`quot` mapHeight) $ (maxBound :: Word)
+maxWordAbsHorizontal = fromIntegral $ floor $ sqrt $ fromIntegral $ ((maxBound :: Word) `quot` 8) `quot` mapHeight
 
 maxChunkAbsHorizontal :: Int32
-maxChunkAbsHorizontal = (`quot` chunkBlocks) $
-	min (fromIntegral maxWordAbsHorizontal) (maxBound :: Int32)
+maxChunkAbsHorizontal = (`quot` chunkSizeHorizontal) $
+	let n = fromIntegral maxWordAbsHorizontal :: Int32 in if fromIntegral n /= maxWordAbsHorizontal then
+		(maxBound :: Int32)
+		else
+			n
 
 maxAbsHorizontal :: Int32
-maxAbsHorizontal = maxChunkAbsHorizontal * chunkBlocks
+--temporary until I get detection working
+--maxAbsHorizontal = 3000
+maxAbsHorizontal = maxChunkAbsHorizontal * chunkSizeHorizontal
 
 maxHorizontal :: Int32
 maxHorizontal = maxAbsHorizontal - 1
@@ -119,8 +125,6 @@ mapMinVectorX = minHorizontal
 mapMinVectorZ :: Int32
 mapMinVectorZ = minHorizontal
 
-mapMaxVectorXY = (mapMaxVectorY * mapMaxVectorX)
-
 mapBlockVector :: Int32 -> Int32 -> Int32 -> Maybe MapBlockVector
 mapBlockVector x y z
 	| x > mapMaxVectorX = Nothing
@@ -129,16 +133,16 @@ mapBlockVector x y z
 	| x < mapMinVectorX = Nothing
 	| y < mapMinVectorY = Nothing
 	| z < mapMinVectorZ = Nothing
-	| otherwise = Just $ MapBlockVector (fromIntegral (y + (x * mapMaxVectorY) + (z * mapMaxVectorXY)))
+	| otherwise = Just $ MapBlockVector x y z
 
 mapBlockVectorZ :: MapBlockVector -> Int32
-mapBlockVectorZ (MapBlockVector v) = (fromIntegral v) `quot` (mapMaxVectorX * mapMaxVectorY)
+mapBlockVectorZ (MapBlockVector _ _ z) = z
 
 mapBlockVectorX :: MapBlockVector -> Int32
-mapBlockVectorX (MapBlockVector v) = ((fromIntegral v) `quot` mapMaxVectorY) `div` mapMaxVectorX
+mapBlockVectorX (MapBlockVector x _ _) = x
 
 mapBlockVectorY :: MapBlockVector -> Int32
-mapBlockVectorY (MapBlockVector v) = (fromIntegral v) `div` mapMaxVectorY
+mapBlockVectorY (MapBlockVector _ y _) = y
 
 maxChunkHorizontal :: Int32
 maxChunkHorizontal = maxChunkAbsHorizontal
@@ -159,21 +163,13 @@ mapMinChunkVectorZ :: Int32
 mapMinChunkVectorZ = minChunkHorizontal
 
 mapChunkVector :: Int32 -> Int32 -> Maybe MapChunkVector
-mapChunkVector x z
-	| x > mapMaxChunkVectorX = Nothing
-	| z > mapMaxChunkVectorZ = Nothing
-	| x < mapMinChunkVectorX = Nothing
-	| z < mapMinChunkVectorZ = Nothing
-	| otherwise = Just $ MapChunkVector (fromIntegral $ (x * mapMaxVectorY) + (z * mapMaxVectorXY) - 1)
+mapChunkVector x z = maybe Nothing (Just . MapChunkVector) $ mapBlockVector (x * 16) 0 (z * 16)
 
 mapChunkVectorZ :: MapChunkVector -> Int32
-mapChunkVectorZ (MapChunkVector v) = (fromIntegral v) `quot` (mapMaxVectorX * mapMaxVectorY)
+mapChunkVectorZ (MapChunkVector v) = (mapBlockVectorZ v) `quot` 16
 
 mapChunkVectorX :: MapChunkVector -> Int32
-mapChunkVectorX (MapChunkVector v) = ((fromIntegral v) `quot` mapMaxVectorY) `div` mapMaxVectorX
-
-mapChunkVectorY :: MapChunkVector -> Int32
-mapChunkVectorY (MapChunkVector v) = (fromIntegral v) `div` mapMaxVectorY
+mapChunkVectorX (MapChunkVector v) = (mapBlockVectorX v) `quot` 16
 
 newtype MinecraftMap = MinecraftMap 
 	{ minecraftMapBlocks :: Judy.JudyL Word
@@ -192,30 +188,77 @@ data MapBlock = MapBlock
 	}
 	deriving (Show, Eq)
 
+xwidth = fromIntegral maxAbsHorizontal
+ywidth = mapHeight
+zwidth = xwidth
+xywidth = xwidth * ywidth
+xyzwidth = xywidth * zwidth
+
+arrayIndex :: MapBlockVector -> Word
+arrayIndex (MapBlockVector x y z) =
+	let
+		xlt0 = x < 0
+		ylt0 = y < 0
+		zlt0 = z < 0
+		offset = if xlt0 then
+				if ylt0 then
+						if zlt0 then
+								0
+							else
+								xyzwidth
+					else
+						if zlt0 then
+								xyzwidth * 2
+							else
+								xyzwidth * 3
+			else
+				if ylt0 then
+						if zlt0 then
+								xywidth * 4
+							else
+								xyzwidth * 5
+					else
+						if zlt0 then
+								xyzwidth * 6
+							else
+								xyzwidth * 7
+		nx = fromIntegral $ abs x
+		ny = fromIntegral $ abs y
+		nz = fromIntegral $ abs z
+		in
+			offset + ny + nz * xywidth + nx * ywidth
+
+mapBlockVectorToChunkVector :: MapBlockVector -> MapChunkVector
+mapBlockVectorToChunkVector (MapBlockVector x y z)
+	= MapChunkVector (MapBlockVector ((x `quot` 16) * 16) ((y `quot` 16) * 16) ((z `quot` 16) * 16))
+			
 setMapBlock :: MinecraftMap -> MapBlockVector -> MapBlock -> IO ()
-setMapBlock (MinecraftMap mapBlocks) (MapBlockVector w)
+setMapBlock (MinecraftMap mapBlocks) blockVector
 	MapBlock
 		{ mapBlockBlock = block
 		, mapBlockLighting = lighting
 		} = do
 	let
+		w = arrayIndex blockVector
 		i = w `quot` blocksInWord
-		d = w `div` blocksInWord
+		d = w `rem` blocksInWord
 		b = (Block.blockId block) * 256
 		  + (fromIntegral lighting * 16)
 		  + (Block.blockSecondaryData block)
 	Judy.adjust (\w -> w .&. (complement $ d * 255) .|. (d * b)) i mapBlocks
 
 getExistingMapBlock :: MinecraftMap -> MapBlockVector -> IO (Maybe MapBlock)
-getExistingMapBlock (MinecraftMap mapBlocks) (MapBlockVector v) =
+getExistingMapBlock (MinecraftMap mapBlocks) blockVector =
 	let
+		v = arrayIndex blockVector
 		i = v `quot` blocksInWord
-		d = v `div` blocksInWord
+		d = v `rem` blocksInWord
 		in do
 			mw <- Judy.lookup i mapBlocks
 			case mw of
 				(Just w) -> do
 					let
+						w = arrayIndex blockVector
 						b = (w `quot` d)
 						blockId = (b `quot` 256) .&. 0xFF
 						metadata = b .&. 0x0F
@@ -230,7 +273,7 @@ generateMapBlock :: MinecraftMap -> MapBlockVector -> IO MapBlock
 generateMapBlock map@MinecraftMap {minecraftMapBlocks = mMapBlocks} v
 	= do
 		let y = mapBlockVectorY v
-		let mapBlock = case y `compare` 63 of
+		let mapBlock = case y `compare` 5 of
 			LT -> MapBlock Block.Dirt 0x0F
 			EQ -> MapBlock Block.Grass 0x0F
 			GT -> MapBlock Block.Air 0x0F
@@ -244,37 +287,32 @@ getMapBlock map@MinecraftMap {minecraftMapBlocks = mMapBlocks} v = do
 	return mapBlock
 
 getMapChunk :: MinecraftMap -> MapChunkVector -> IO [MapBlock]
-getMapChunk map@MinecraftMap {minecraftMapBlocks = judy} v = do
-	sequence $ case v of (MapChunkVector w) -> let v = (MapBlockVector (w * 16)) in getMapChunkY v (v + mapChunkYSizeVec)
+getMapChunk map@MinecraftMap {minecraftMapBlocks = judy} (MapChunkVector v) = do
+	sequence $ getMapChunkX xi yi zi
 	where
-		getMapChunkY :: MapBlockVector -> MapBlockVector -> [IO MapBlock]
-		getMapChunkY curr final =
-			if curr /= final then
-				getMapChunkZ curr (curr + mapChunkZSizeVec) (getMapChunkY (curr + oneBlockY) final)
+		xi = mapBlockVectorX v
+		yi = 0
+		zi = mapBlockVectorZ v
+		maxX = xi + 16
+		maxY = 128
+		maxZ = zi + 16
+		getMapChunkX :: Int32 -> Int32 -> Int32 -> [IO MapBlock]
+		getMapChunkX x y z =
+			if x < maxX then
+				getMapChunkZ x y z (getMapChunkX (x + 1) y z)
 			else
 				[]
 		
-		getMapChunkZ :: MapBlockVector -> MapBlockVector -> [IO MapBlock] -> [IO MapBlock]
-		getMapChunkZ curr final next =
-			if curr /= final then
-				getMapChunkX curr (curr + mapChunkXSizeVec) (getMapChunkZ (curr + oneBlockZ) final next)
+		getMapChunkZ :: Int32 -> Int32 -> Int32 -> [IO MapBlock] -> [IO MapBlock]
+		getMapChunkZ x y z next =
+			if z < maxZ then
+				getMapChunkY x y z (getMapChunkZ x y (z + 1) next)
 			else
 				next
 		
-		getMapChunkX :: MapBlockVector -> MapBlockVector -> [IO MapBlock] -> [IO MapBlock]
-		getMapChunkX curr final next =
-			if curr /= final then
-				getMapBlock map curr : (getMapChunkX (curr + oneBlockX) final next)
+		getMapChunkY :: Int32 -> Int32 -> Int32 -> [IO MapBlock] -> [IO MapBlock]
+		getMapChunkY x y z next =
+			if y < maxY then
+				getMapBlock map (MapBlockVector x y z) : (getMapChunkY x (y + 1) z next)
 			else
 				next
-		mapChunkXSize = (oneBlockX * 16)
-
-		multv w n = case w of (MapBlockVector w) -> (MapBlockVector (w * n))
-		mapChunkXSizeVec = multv oneBlockX 16
-		mapChunkYSizeVec = multv oneBlockY 128
-		mapChunkZSizeVec = multv oneBlockZ 16
-		mapChunkSizeVec = (oneBlockX `multv` (16 * 16 * 128)) + (oneBlockZ `multv` (16 * 128)) + (oneBlockY `multv` 128)
-		
-		oneBlockX = fromJust $ mapBlockVector 1 0 0
-		oneBlockY = fromJust $ mapBlockVector 0 1 0
-		oneBlockZ = fromJust $ mapBlockVector 0 0 1

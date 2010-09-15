@@ -13,6 +13,8 @@ import qualified Codec.Compression.Zlib as Zlib
 import Data.Int
 import Data.Word
 import Data.Bits
+import Debug.Trace
+import Control.Monad
 
 data ServerPacket
 	= KeepAlive
@@ -29,6 +31,11 @@ data ServerPacket
 		}
 	| Time
 		{ timeMinutes :: Int64
+		}
+	| SetPlayerInventory
+		{ setPlayerInventoryType :: PlayerInventoryType
+		, setPlayerInventoryCount :: Word16
+		, setPlayerInventoryItems :: [Maybe (Word16, Word8, Word16)]
 		}
 	| PlayerOnGround
 		{ playerOnGround :: Bool
@@ -87,6 +94,13 @@ data ServerPacket
 	| CollectItem
 		{ collectItemItemEntityId :: Word32
 		, collectItemCollectorEntityId :: Word32
+		}
+	| ObjectSpawn
+		{ objectSpawnEntityId :: Word32
+		, objectSpawnObjectType :: Word8
+		, objectSpawnX :: Int32
+		, objectSpawnY :: Int32
+		, objectSpawnZ :: Int32
 		}
 	| HoldItem
 		{ entityId :: Word32
@@ -181,6 +195,8 @@ instance Packet ServerPacket where
 	packetId Handshake {}          = 0x02
 	packetId Chat {}               = 0x03
 	packetId Time {}               = 0x04
+	packetId SetPlayerInventory {} = 0x05
+	packetId PlayerSpawn {}        = 0x06
 	packetId PlayerOnGround {}     = 0x0A
 	packetId PlayerPosition {}     = 0x0B
 	packetId PlayerLook {}         = 0x0C
@@ -191,6 +207,7 @@ instance Packet ServerPacket where
 	packetId NamedEntitySpawn {}   = 0x14
 	packetId ItemSpawn {}          = 0x15
 	packetId CollectItem {}        = 0x16
+	packetId ObjectSpawn {}        = 0x17
 	packetId MobSpawn {}           = 0x18
 	packetId DestroyEntity {}      = 0x1D
 	packetId InitEnity {}          = 0x1E
@@ -231,7 +248,20 @@ instance Packet ServerPacket where
 		
 	putPacketContents (Time minutes) = do
 		Put.putWord64be (fromIntegral minutes)
-		
+	
+	putPacketContents (SetPlayerInventory inventoryType count inventoryData) = do
+		putPlayerInventoryType inventoryType
+		Put.putWord16be count
+		mapM_ (\itemData ->
+			case itemData of
+				(Just (itemId, itemCount, itemHealth)) -> do
+					Put.putWord16be itemId
+					Put.putWord8 itemCount
+					Put.putWord16be itemHealth
+				Nothing -> do
+					Put.putWord16be (-1)
+			) inventoryData
+	
 	putPacketContents (PlayerOnGround onGround) = do
 		putBool onGround
 	
@@ -295,6 +325,13 @@ instance Packet ServerPacket where
 		Put.putWord8 (fromIntegral pitch)
 		Put.putWord8 (fromIntegral unk2)
 	
+	putPacketContents (ObjectSpawn entityId objectType x y z) = do
+		Put.putWord32be entityId
+		Put.putWord8 objectType
+		Put.putWord32be (fromIntegral x)
+		Put.putWord32be (fromIntegral y)
+		Put.putWord32be (fromIntegral z)
+	
 	putPacketContents (CollectItem collectedEntityId collectorEntityId) = do
 		Put.putWord32be collectedEntityId
 		Put.putWord32be collectorEntityId
@@ -353,12 +390,14 @@ instance Packet ServerPacket where
 		Put.putWord8 sizeX
 		Put.putWord8 sizeY
 		Put.putWord8 sizeZ
-		let bs = Zlib.compress $
-			BSL.concat [ BSL.pack blockTypes
-		              , BSL.pack blockMetadata
-		              , doublePack blockLighting
-		              ]
-		Put.putWord16be (fromIntegral $ BSL.length bs)
+		let blockData = BSL.concat
+			[ BSL.pack blockTypes
+			, BSL.pack blockMetadata
+			, doublePack blockLighting
+			]
+		let bs = Zlib.compress blockData
+			
+		Put.putWord32be (fromIntegral $ BSL.length bs)
 		Put.putLazyByteString bs
 		
 	putPacketContents (MultiBlockChange x z size coordinates blockTypes blockMetadata) = do

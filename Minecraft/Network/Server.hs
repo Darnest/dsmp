@@ -18,7 +18,11 @@ import Minecraft.Player
 import Minecraft.World
 import Minecraft.Entity
 import Minecraft.Block (blockId, blockSecondaryData)
+import qualified Minecraft.Block as Block
 import Minecraft.Server.ServerId
+import Minecraft.Player.Inventory
+import Minecraft.Network.Protocol.ServerPacket.Encoding
+import Minecraft.Time
 
 import qualified Network
 import qualified Network.Socket as Socket
@@ -35,6 +39,7 @@ import Control.Monad
 import System.IO.Unsafe (unsafeInterleaveIO)
 import Control.Monad.Trans
 import Data.Maybe
+import Data.Int
 
 type ClientAction a = ClientActionT IO a
 
@@ -80,9 +85,8 @@ instance ClientBehavior Client where
 		{ clientPacketWriteChan = wChan
 		, clientDisconnectAction = dAction
 		} packet = do
-		lift $ putStrLn ("sending packet to wchan " ++ (show packet))
 		succ <- lift $ writeSChan wChan packet
-		lift $ putStrLn ("sent packet to wchan " ++ (show packet))
+		lift $ putStrLn ("sent packet to wchan " ++ (take 1000 $ show packet))
 		if succ then
 				return ()
 			else do
@@ -92,7 +96,6 @@ instance ClientBehavior Client where
 		{ clientPacketReadChan = rChan
 		, clientDisconnectAction = dAction
 		} = do
-		lift $ putStrLn "waiting for packet from rchan"
 		mPacket <- lift $ readSChan rChan
 		return ()
 		case mPacket of
@@ -111,24 +114,34 @@ instance ClientBehavior Client where
 		, clientDisconnectAction = mAction
 		} action = do
 			succ <- lift $ tryPutMVar mAction action
+			lift $ putStrLn "stopping client..."
 			if succ then do
 					lift $ do
 						forkIO $ do
+							putStrLn "closing wchan..."
 							closeSChan wChan
+							putStrLn "closed wchan..."
 							return ()
 						forkIO $ do
+							putStrLn "closing rchan..."
 							closeSChan rChan
+							putStrLn "closed rchan..."
 							return ()
 					failedClientActionResultT $ action
 				else do
+					lift $ putStrLn "failed to stop client"
 					disconnect <- lift $ readMVar mAction
 					failedClientActionResultT disconnect
 
-	kickClient client s = stopClient client $ ClientKicked s
+	kickClient client s = do
+		sendPacket client $ ServerPacket.Kick s
+		stopClient client $ ClientKicked s
 	
 unexpectedDisconnectClient :: ClientBehavior client => client -> String -> ClientAction a
 unexpectedDisconnectClient client s = stopClient client $ UnexpectedClientDisconnect s
-	
+
+sendPackets :: ClientBehavior client => client -> [ServerPacket] -> ClientAction ()
+sendPackets client = mapM_ (sendPacket client)
 
 instance ClientBehavior PlayerClient where
 	sendPacket = sendPacket . playerClientClient
@@ -211,6 +224,8 @@ authenticateClient serverId client = do
 		{ playerClientPlayer = Player
 			{ playerUsername = username
 			, playerHeldItem = Nothing
+			, playerInventory = emptyPlayerInventory
+			, playerDigStatus = PlayerNotDigging
 			}
 		, playerClientClient = client
 		}
@@ -231,12 +246,13 @@ sendMapChunk PlayerWorldClient
 			, ServerPacket.preChunkZ = z
 			, ServerPacket.preChunkMode = True
 			}
+		
 		chunk <- lift $ unsafeInterleaveIO $ getMapChunk minecraftMap v
 		let blocks = map mapBlockBlock chunk
 		sendPacket client ServerPacket.MapChunk
-			{ ServerPacket.mapChunkX = x
+			{ ServerPacket.mapChunkX = x * 16
 			, ServerPacket.mapChunkY = 0
-			, ServerPacket.mapChunkZ = z
+			, ServerPacket.mapChunkZ = z * 16
 			, ServerPacket.mapChunkXSize = 15
 			, ServerPacket.mapChunkYSize = 127
 			, ServerPacket.mapChunkZSize = 15
@@ -245,7 +261,85 @@ sendMapChunk PlayerWorldClient
 			, ServerPacket.mapChunkBlockLighting = map mapBlockLighting chunk
 			}
 
+sendUnloadClientMapChunk :: PlayerWorldClient -> MapChunkVector -> ClientAction ()
+sendUnloadClientMapChunk client v = do
+		let
+			x = mapChunkVectorX v
+			z = mapChunkVectorZ v
 		
+		sendPacket client ServerPacket.PreChunk
+			{ ServerPacket.preChunkX = x
+			, ServerPacket.preChunkZ = z
+			, ServerPacket.preChunkMode = False
+			}
+
+mapChunkRadius :: Integral a => a
+mapChunkRadius = 3
+
+sendAllClientMapChunks :: PlayerWorldClient -> MapChunkVector -> ClientAction ()
+sendAllClientMapChunks client chunkVector
+	= doSend minX minZ
+	where
+		aChunkRadius = mapChunkRadius - 1
+		xi = mapChunkVectorX chunkVector
+		zi = mapChunkVectorZ chunkVector
+		minX = xi - mapChunkRadius
+		minZ = zi - mapChunkRadius
+		maxX = xi + aChunkRadius
+		maxZ = zi + aChunkRadius
+		doSend :: Int32 -> Int32 -> ClientAction ()
+		doSend x z = do
+			case mapChunkVector x z of
+				(Just v) -> sendMapChunk client v
+				Nothing -> return ()
+			if x < maxX then
+					doSend (x + 1) z
+				else
+					if z < maxZ then
+							doSend minX (z + 1)
+						else
+							return ()
+
+updateClientMapChunks :: PlayerWorldClient -> MapChunkVector -> MapChunkVector -> ClientAction ()
+updateClientMapChunks client oldChunkVector newChunkVector
+	= doSend (min minX oldMinX) (min minZ oldMinZ)
+	where
+		aChunkRadius = mapChunkRadius - 1
+		oldXi = mapChunkVectorX oldChunkVector
+		oldZi = mapChunkVectorZ oldChunkVector
+		oldMinX = oldXi - mapChunkRadius
+		oldMinZ = oldZi - mapChunkRadius
+		oldMaxX = oldXi + aChunkRadius
+		oldMaxZ = oldZi + aChunkRadius
+		xi = mapChunkVectorX newChunkVector
+		zi = mapChunkVectorZ newChunkVector
+		minX = xi - mapChunkRadius
+		minZ = zi - mapChunkRadius
+		maxX = xi + aChunkRadius
+		maxZ = zi + aChunkRadius
+		maxXCheck = max maxX oldMaxX
+		maxZCheck = max maxZ oldMaxZ
+		doSend :: Int32 -> Int32 -> ClientAction ()
+		doSend x z = do
+			if x < oldMinX || x > oldMaxX || z < oldMinZ || z > oldMaxZ then
+					case mapChunkVector x z of
+						(Just v) -> sendMapChunk client v
+						Nothing -> return ()
+				else
+					if x < minX || x > maxX || z < minZ || z > maxZ then
+							case mapChunkVector x z of
+								(Just v) -> sendUnloadClientMapChunk client v
+								Nothing -> return ()
+						else
+							return ()
+			if x < maxXCheck then
+					doSend (x + 1) z
+				else
+					if z < maxZCheck then
+							doSend minX (z + 1)
+						else
+							return ()
+
 sendClientWorld :: World -> PlayerClient -> ClientAction PlayerWorldClient
 sendClientWorld world@World
 	{ worldMap = map
@@ -261,31 +355,68 @@ sendClientWorld world@World
 			, playerWorldClientWorld = world
 			}
 		let blockVector = entityMapBlockVector playerEntity
-		sendPacket client ServerPacket.PlayerSpawn
-			{ ServerPacket.playerSpawnX = mapBlockVectorX blockVector
-			, ServerPacket.playerSpawnY = mapBlockVectorY blockVector
-			, ServerPacket.playerSpawnZ = mapBlockVectorZ blockVector
-			}
-		sendMapChunk playerWorldClient (fromJust $ mapChunkVector 0 0)
-		sendPacket client ServerPacket.PlayerPositionLook
-			{ ServerPacket.playerPositionLookX = entityX playerEntity
-			, ServerPacket.playerPositionLookY = entityY playerEntity
-			, ServerPacket.playerPositionLookStance = 65.620000004768372 
-			, ServerPacket.playerPositionLookZ = entityZ playerEntity
-			, ServerPacket.playerPositionLookRotation = realToFrac $ entityRotation playerEntity
-			, ServerPacket.playerPositionLookPitch = realToFrac $ entityPitch playerEntity
-			, ServerPacket.playerPositionLookOnGround = True
-			}
+		sendPackets client (encodeSetPlayerInventory $ playerInventory player)
+		sendPacket client $ encodePlayerBlockSpawn $ entityMapBlockVector playerEntity
+		sendAllClientMapChunks playerWorldClient (entityMapChunkVector playerEntity)
+		sendPacket client $ encodePlayerPositionLook playerEntity
+		sendPacket client $ encodeMinecraftTime minecraftTimeNoon
 		return playerWorldClient
 
 actPlayerWorldClient :: PlayerWorldClient -> ClientAction ()
-actPlayerWorldClient client = forever $ do
-	lift $ putStrLn "waiting for a packet"
+actPlayerWorldClient client@PlayerWorldClient
+	{ playerWorldClientWorld = world
+	, playerWorldClientPlayerEntity = playerEntity
+	} = forever $ do
 	packet <- getNonPingPacket client
-	lift $ putStrLn "got packet"
-	case packet of
-		_ -> return ()
-
+	let map = worldMap world
+	mPlayerEntity <- case packet of
+		ClientPacket.PlayerPosition
+			{ ClientPacket.playerPositionX = x
+			, ClientPacket.playerPositionY = y
+			, ClientPacket.playerPositionStance = stance
+			, ClientPacket.playerPositionZ = z
+			, ClientPacket.playerPositionOnGround = onGround
+			} -> do
+				return Nothing
+		ClientPacket.PlayerLook
+			{ ClientPacket.playerLookRotation = rot
+			, ClientPacket.playerLookPitch = pitch
+			, ClientPacket.playerLookOnGround = onGRound
+			} -> return Nothing
+		ClientPacket.PlayerPositionLook
+			{ ClientPacket.playerPositionLookX = x
+			, ClientPacket.playerPositionLookY = y
+			, ClientPacket.playerPositionLookStance = stance
+			, ClientPacket.playerPositionLookZ = z
+			, ClientPacket.playerPositionLookRotation = rot
+			, ClientPacket.playerPositionLookPitch = pitch
+			, ClientPacket.playerPositionLookOnGround = onGround
+			} -> do
+				return Nothing
+		ClientPacket.Dig
+			{ ClientPacket.digStatus = status
+			, ClientPacket.digX = x
+			, ClientPacket.digY = y
+			, ClientPacket.digZ = z
+			, ClientPacket.digBlockDirection = direction
+			} -> do
+				case (mapBlockVector x (fromIntegral y) z) of
+					(Just blockVector) ->
+						case status of
+							_ -> do
+								let block = Block.Air
+								lift $ setMapBlock map blockVector MapBlock
+									{ mapBlockBlock = block
+									, mapBlockLighting = 0x0F
+									}
+								sendPacket client $ encodeBlockChange blockVector block
+								return Nothing
+					Nothing -> return Nothing
+		_ -> return Nothing
+	case mPlayerEntity of
+		(Just newPlayerEntity) -> do
+			updateClientMapChunks client (entityMapChunkVector playerEntity) (entityMapChunkVector playerEntity)
+		Nothing -> return ()
 data ServerConfig
 	= ServerConfig
 		{ serverConfigPort :: Network.PortID

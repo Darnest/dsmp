@@ -16,7 +16,9 @@ module Minecraft.Network.Protocol.Data
 	, doublePack
 	, doubleUnpack
 	
-	, Block
+	, PlayerInventoryType (..)
+	, putPlayerInventoryType
+	, getPlayerInventoryType
 	) where
 
 import Minecraft.Network.Protocol.Packet
@@ -36,6 +38,28 @@ import qualified Data.ByteString.UTF8 as BSUTF8
 import qualified Data.ByteString.Lazy.UTF8 as BSLUTF8
 import qualified Control.Exception as Exception
 import qualified Data.Typeable as Typeable
+import Debug.Trace
+
+data PlayerInventoryType = PlayerMainInventoryType | PlayerEquippedInventoryType | PlayerCraftingSlotInventoryType
+	deriving (Show, Eq)
+
+playerInventoryTypeFromId :: Integral a => a -> PlayerInventoryType
+playerInventoryTypeFromId (-1) = PlayerMainInventoryType
+playerInventoryTypeFromId (-2) = PlayerEquippedInventoryType
+playerInventoryTypeFromId (-3) = PlayerCraftingSlotInventoryType
+
+playerInventoryTypeToId :: Integral a => PlayerInventoryType -> a
+playerInventoryTypeToId PlayerMainInventoryType = (-1)
+playerInventoryTypeToId PlayerEquippedInventoryType = (-2)
+playerInventoryTypeToId PlayerCraftingSlotInventoryType = (-3)
+
+getPlayerInventoryType :: Get.Get PlayerInventoryType
+getPlayerInventoryType = do
+	inventoryTypeId <- Get.getWord32be
+	return $ playerInventoryTypeFromId inventoryTypeId
+
+putPlayerInventoryType :: PlayerInventoryType -> Put.Put
+putPlayerInventoryType = Put.putWord32be . playerInventoryTypeToId
 
 putPacketString :: String -> Put.Put
 putPacketString s = do
@@ -61,7 +85,7 @@ getBool = do
 	return (case i of
 		0 -> False
 		1 -> True
-		_ -> Exception.throw ProtocolExceptionInvalidData)
+		_ -> ("invalid bool value: " ++ show i) `trace` Exception.throw ProtocolExceptionInvalidData)
 
 data BlockDirection = XPos | XNeg | YPos | YNeg | ZPos | ZNeg
 	deriving (Eq, Show)
@@ -86,15 +110,16 @@ getBlockDirection = do
 		0 -> YNeg
 		3 -> ZPos
 		2 -> ZNeg
-		_ -> Exception.throw ProtocolExceptionInvalidData)
+		_ -> ("invalid block direction: " ++ (show i)) `trace` Exception.throw ProtocolExceptionInvalidData)
 
-data DigStatus = DigStart | DigStop | DigFinish
+data DigStatus = DigStart | Digging | DigStop | DigFinish
 	deriving (Eq, Show)
 
 putDigStatus :: DigStatus -> Put.Put
 putDigStatus dir
 	= Put.putWord8 (case dir of
-		DigStart  -> 1
+		DigStart  -> 0
+		Digging   -> 1
 		DigStop   -> 2
 		DigFinish -> 3)
 
@@ -102,10 +127,11 @@ getDigStatus :: Get.Get DigStatus
 getDigStatus = do
 	i <- Get.getWord8
 	return (case i of
-		1 -> DigStart
+		0 -> DigStart
+		1 -> Digging
 		2 -> DigStop
 		3 -> DigFinish
-		_ -> Exception.throw ProtocolExceptionInvalidData)
+		_ -> ("invalid dig status: " ++ show i) `trace` Exception.throw ProtocolExceptionInvalidData)
 
 doublePack :: [Word8] -> BSL.ByteString
 doublePack = 
