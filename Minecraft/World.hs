@@ -17,6 +17,7 @@ module Minecraft.World
 	, updateWorldMobEntity
 	, updateWorldItemEntity
 	, updateWorldObjectEntity
+	, moveWorldEntity
 	) where
 import Minecraft.Entity
 import Minecraft.Entity.EntityId
@@ -47,6 +48,12 @@ data World = World
 	, worldEntityIdGenerator :: MVar EntityIdGenerator
 	, worldMap :: MinecraftMap
 	}
+
+moveWorldEntity :: Entity entity => World -> entity -> EntityPosition -> IO entity
+moveWorldEntity world entity position = do
+	let newEntity = setEntityPosition entity position
+	updateWorldEntity world newEntity
+	return newEntity
 
 updateWorldPlayerEntity :: World -> PlayerEntity -> IO ()
 updateWorldPlayerEntity

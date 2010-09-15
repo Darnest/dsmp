@@ -5,6 +5,7 @@ module Minecraft.Entity
 	, MobEntity (..)
 	, ItemEntity (..)
 	, ObjectEntity (..)
+	, EntityPosition (..)
 	, toAnyEntity
 	, entityPosition
 	, entityPositionX
@@ -25,5 +26,6 @@ module Minecraft.Entity
 	, entityPositionMapChunkVector
 	, entityMapBlockVector
 	, entityMapChunkVector
+	, setEntityPosition
 	) where
 import Minecraft.Entity.Internal

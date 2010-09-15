@@ -23,6 +23,7 @@ import Minecraft.Server.ServerId
 import Minecraft.Player.Inventory
 import Minecraft.Network.Protocol.ServerPacket.Encoding
 import Minecraft.Time
+import Minecraft.Server.MapChunkVectorTree
 
 import qualified Network
 import qualified Network.Socket as Socket
@@ -40,6 +41,8 @@ import System.IO.Unsafe (unsafeInterleaveIO)
 import Control.Monad.Trans
 import Data.Maybe
 import Data.Int
+import Data.Vector.V3
+
 
 type ClientAction a = ClientActionT IO a
 
@@ -63,8 +66,9 @@ data PlayerWorldClient
 	= PlayerWorldClient
 		{ playerWorldClientPlayer :: Player
 		, playerWorldClientClient :: Client
-		, playerWorldClientPlayerEntity :: PlayerEntity
+		, playerWorldClientPlayerEntity :: MVar PlayerEntity
 		, playerWorldClientWorld :: World
+		, playerWorldClientLoadedChunks :: MVar MapChunkVectorTree
 		}
 
 class ClientBehavior client where
@@ -86,7 +90,7 @@ instance ClientBehavior Client where
 		, clientDisconnectAction = dAction
 		} packet = do
 		succ <- lift $ writeSChan wChan packet
-		lift $ putStrLn ("sent packet to wchan " ++ (take 1000 $ show packet))
+		--lift $ putStrLn ("sent packet to wchan " ++ (take 1000 $ show packet))
 		if succ then
 				return ()
 			else do
@@ -100,7 +104,7 @@ instance ClientBehavior Client where
 		return ()
 		case mPacket of
 			(Just packet) -> do
-				lift $ putStrLn $ "got packet from rchan: " ++ (show packet)
+				--lift $ putStrLn $ "got packet from rchan: " ++ (show packet)
 				case packet of
 					(ClientPacket.Disconnect message) -> clientActionResultT (ClientDisconnected message)
 					_ -> return packet
@@ -274,11 +278,17 @@ sendUnloadClientMapChunk client v = do
 			}
 
 mapChunkRadius :: Integral a => a
-mapChunkRadius = 3
+mapChunkRadius = 5
 
 sendAllClientMapChunks :: PlayerWorldClient -> MapChunkVector -> ClientAction ()
-sendAllClientMapChunks client chunkVector
-	= doSend minX minZ
+sendAllClientMapChunks
+	client@PlayerWorldClient
+		{ playerWorldClientLoadedChunks = mLoadedChunks
+		}
+	chunkVector = do
+		loadedChunks <- lift $ takeMVar mLoadedChunks
+		chunks <- doSend loadedChunks minX minZ
+		lift $ putMVar mLoadedChunks chunks
 	where
 		aChunkRadius = mapChunkRadius - 1
 		xi = mapChunkVectorX chunkVector
@@ -287,58 +297,66 @@ sendAllClientMapChunks client chunkVector
 		minZ = zi - mapChunkRadius
 		maxX = xi + aChunkRadius
 		maxZ = zi + aChunkRadius
-		doSend :: Int32 -> Int32 -> ClientAction ()
-		doSend x z = do
-			case mapChunkVector x z of
-				(Just v) -> sendMapChunk client v
-				Nothing -> return ()
+		doSend :: MapChunkVectorTree -> Int32 -> Int32 -> ClientAction MapChunkVectorTree
+		doSend tree x z = do
+			newTree <- case mapChunkVector x z of
+				(Just v) -> do
+					sendMapChunk client v
+					return (mapChunkVectorTreeInsert tree v)
+				Nothing -> return tree
 			if x < maxX then
-					doSend (x + 1) z
+					doSend newTree (x + 1) z
 				else
 					if z < maxZ then
-							doSend minX (z + 1)
+							doSend newTree minX (z + 1)
 						else
-							return ()
+							return newTree
 
-updateClientMapChunks :: PlayerWorldClient -> MapChunkVector -> MapChunkVector -> ClientAction ()
-updateClientMapChunks client oldChunkVector newChunkVector
-	= doSend (min minX oldMinX) (min minZ oldMinZ)
-	where
-		aChunkRadius = mapChunkRadius - 1
-		oldXi = mapChunkVectorX oldChunkVector
-		oldZi = mapChunkVectorZ oldChunkVector
-		oldMinX = oldXi - mapChunkRadius
-		oldMinZ = oldZi - mapChunkRadius
-		oldMaxX = oldXi + aChunkRadius
-		oldMaxZ = oldZi + aChunkRadius
-		xi = mapChunkVectorX newChunkVector
-		zi = mapChunkVectorZ newChunkVector
-		minX = xi - mapChunkRadius
-		minZ = zi - mapChunkRadius
-		maxX = xi + aChunkRadius
-		maxZ = zi + aChunkRadius
-		maxXCheck = max maxX oldMaxX
-		maxZCheck = max maxZ oldMaxZ
-		doSend :: Int32 -> Int32 -> ClientAction ()
-		doSend x z = do
-			if x < oldMinX || x > oldMaxX || z < oldMinZ || z > oldMaxZ then
-					case mapChunkVector x z of
-						(Just v) -> sendMapChunk client v
-						Nothing -> return ()
-				else
-					if x < minX || x > maxX || z < minZ || z > maxZ then
-							case mapChunkVector x z of
-								(Just v) -> sendUnloadClientMapChunk client v
-								Nothing -> return ()
+updateClientMapChunks :: PlayerWorldClient -> MapChunkVector -> ClientAction ()
+updateClientMapChunks
+	client@PlayerWorldClient
+		{ playerWorldClientLoadedChunks = mLoadedChunks
+		}
+	chunkVector = do
+		loadedChunks <- lift $ takeMVar mLoadedChunks
+		chunks <- doUnload loadedChunks
+		chunks2 <- doSend chunks minX minZ
+		lift $ putMVar mLoadedChunks chunks2
+		where
+			aChunkRadius = mapChunkRadius - 1
+			xi = mapChunkVectorX chunkVector
+			zi = mapChunkVectorZ chunkVector
+			minX = xi - mapChunkRadius
+			minZ = zi - mapChunkRadius
+			maxX = xi + aChunkRadius
+			maxZ = zi + aChunkRadius
+			doUnload :: MapChunkVectorTree -> ClientAction MapChunkVectorTree
+			doUnload tree = foldM (\tree v -> do
+				let
+					x = mapChunkVectorX v
+					z = mapChunkVectorZ v
+					in if x < minX || x > maxX || z < minZ || z > maxZ then do
+							sendUnloadClientMapChunk client v
+							return (mapChunkVectorTreeRemove tree v)
 						else
-							return ()
-			if x < maxXCheck then
-					doSend (x + 1) z
-				else
-					if z < maxZCheck then
-							doSend minX (z + 1)
+							return tree
+				) tree (mapChunkVectorTreeList tree)
+			doSend :: MapChunkVectorTree -> Int32 -> Int32 -> ClientAction MapChunkVectorTree
+			doSend tree x z = do
+				newTree <- case mapChunkVector x z of
+					(Just v) -> if mapChunkVectorTreeNotMember tree v then do
+							sendMapChunk client v
+							return (mapChunkVectorTreeInsert tree v)
 						else
-							return ()
+							return tree
+					Nothing -> return tree
+				if x < maxX then
+						doSend newTree (x + 1) z
+					else
+						if z < maxZ then
+								doSend newTree minX (z + 1)
+							else
+								return newTree
 
 sendClientWorld :: World -> PlayerClient -> ClientAction PlayerWorldClient
 sendClientWorld world@World
@@ -348,11 +366,14 @@ sendClientWorld world@World
 	, playerClientClient = client
 	} = do
 		playerEntity <- lift $ addWorldPlayer world player
+		mPlayerEntity <- lift $ newMVar playerEntity
+		mLoadedChunks <- lift $ newMVar emptyMapChunkVectorTree
 		let playerWorldClient = PlayerWorldClient
 			{ playerWorldClientPlayer = player
-			, playerWorldClientPlayerEntity = playerEntity
+			, playerWorldClientPlayerEntity = mPlayerEntity
 			, playerWorldClientClient = client
 			, playerWorldClientWorld = world
+			, playerWorldClientLoadedChunks = mLoadedChunks
 			}
 		let blockVector = entityMapBlockVector playerEntity
 		sendPackets client (encodeSetPlayerInventory $ playerInventory player)
@@ -362,61 +383,92 @@ sendClientWorld world@World
 		sendPacket client $ encodeMinecraftTime minecraftTimeNoon
 		return playerWorldClient
 
+decodeAngleFloat = (/ 180) . realToFrac
+
 actPlayerWorldClient :: PlayerWorldClient -> ClientAction ()
 actPlayerWorldClient client@PlayerWorldClient
 	{ playerWorldClientWorld = world
-	, playerWorldClientPlayerEntity = playerEntity
-	} = forever $ do
-	packet <- getNonPingPacket client
-	let map = worldMap world
-	mPlayerEntity <- case packet of
-		ClientPacket.PlayerPosition
-			{ ClientPacket.playerPositionX = x
-			, ClientPacket.playerPositionY = y
-			, ClientPacket.playerPositionStance = stance
-			, ClientPacket.playerPositionZ = z
-			, ClientPacket.playerPositionOnGround = onGround
-			} -> do
-				return Nothing
-		ClientPacket.PlayerLook
-			{ ClientPacket.playerLookRotation = rot
-			, ClientPacket.playerLookPitch = pitch
-			, ClientPacket.playerLookOnGround = onGRound
-			} -> return Nothing
-		ClientPacket.PlayerPositionLook
-			{ ClientPacket.playerPositionLookX = x
-			, ClientPacket.playerPositionLookY = y
-			, ClientPacket.playerPositionLookStance = stance
-			, ClientPacket.playerPositionLookZ = z
-			, ClientPacket.playerPositionLookRotation = rot
-			, ClientPacket.playerPositionLookPitch = pitch
-			, ClientPacket.playerPositionLookOnGround = onGround
-			} -> do
-				return Nothing
-		ClientPacket.Dig
-			{ ClientPacket.digStatus = status
-			, ClientPacket.digX = x
-			, ClientPacket.digY = y
-			, ClientPacket.digZ = z
-			, ClientPacket.digBlockDirection = direction
-			} -> do
-				case (mapBlockVector x (fromIntegral y) z) of
-					(Just blockVector) ->
-						case status of
-							_ -> do
-								let block = Block.Air
-								lift $ setMapBlock map blockVector MapBlock
-									{ mapBlockBlock = block
-									, mapBlockLighting = 0x0F
+	, playerWorldClientPlayerEntity = mPlayerEntity
+	} = do
+		playerEntity <- lift $ takeMVar mPlayerEntity
+		act playerEntity
+		where act playerEntity = do
+			packet <- getNonPingPacket client
+			let map = worldMap world
+			maybePlayerEntity <- case packet of
+				ClientPacket.PlayerPosition
+					{ ClientPacket.playerPositionX = x
+					, ClientPacket.playerPositionY = y
+					, ClientPacket.playerPositionStance = stance
+					, ClientPacket.playerPositionZ = z
+					, ClientPacket.playerPositionOnGround = onGround
+					} -> do
+						newPlayerEntity <- lift $ moveWorldEntity world playerEntity
+							(entityPosition playerEntity)
+								{ entityPositionVector = Vector3
+									{ v3x = x
+									, v3y = y
+									, v3z = z
 									}
-								sendPacket client $ encodeBlockChange blockVector block
-								return Nothing
-					Nothing -> return Nothing
-		_ -> return Nothing
-	case mPlayerEntity of
-		(Just newPlayerEntity) -> do
-			updateClientMapChunks client (entityMapChunkVector playerEntity) (entityMapChunkVector playerEntity)
-		Nothing -> return ()
+								}
+						return $ Just newPlayerEntity
+				ClientPacket.PlayerLook
+					{ ClientPacket.playerLookRotation = rot
+					, ClientPacket.playerLookPitch = pitch
+					, ClientPacket.playerLookOnGround = onGRound
+					} -> do
+						newPlayerEntity <- lift $ moveWorldEntity world playerEntity
+							(entityPosition playerEntity)
+								{ entityPositionRotation = decodeAngleFloat rot
+								, entityPositionPitch = decodeAngleFloat pitch
+								}
+						return $ Just newPlayerEntity
+				ClientPacket.PlayerPositionLook
+					{ ClientPacket.playerPositionLookX = x
+					, ClientPacket.playerPositionLookY = y
+					, ClientPacket.playerPositionLookStance = stance
+					, ClientPacket.playerPositionLookZ = z
+					, ClientPacket.playerPositionLookRotation = rot
+					, ClientPacket.playerPositionLookPitch = pitch
+					, ClientPacket.playerPositionLookOnGround = onGround
+					} -> do
+						newPlayerEntity <- lift $ moveWorldEntity world playerEntity
+							(entityPosition playerEntity)
+								{ entityPositionRotation = decodeAngleFloat rot
+								, entityPositionPitch = decodeAngleFloat pitch
+								, entityPositionVector = Vector3
+									{ v3x = x
+									, v3y = y
+									, v3z = z
+									}
+								}
+						return $ Just newPlayerEntity
+				ClientPacket.Dig
+					{ ClientPacket.digStatus = status
+					, ClientPacket.digX = x
+					, ClientPacket.digY = y
+					, ClientPacket.digZ = z
+					, ClientPacket.digBlockDirection = direction
+					} -> do
+						case (mapBlockVector x (fromIntegral y) z) of
+							(Just blockVector) ->
+								case status of
+									_ -> do
+										let block = Block.Air
+										lift $ setMapBlock map blockVector MapBlock
+											{ mapBlockBlock = block
+											, mapBlockLighting = 0x0F
+											}
+										sendPacket client $ encodeBlockChange blockVector block
+										return Nothing
+							Nothing -> return Nothing
+				_ -> return Nothing
+			nextPlayerEntity <- case maybePlayerEntity of
+				(Just newPlayerEntity) -> do
+					updateClientMapChunks client (entityMapChunkVector newPlayerEntity)
+					return newPlayerEntity
+				Nothing -> return playerEntity
+			act nextPlayerEntity
 data ServerConfig
 	= ServerConfig
 		{ serverConfigPort :: Network.PortID

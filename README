@@ -1,0 +1,5 @@
+To build, download the haskell platform from
+	http://hackage.haskell.org/platform/
+
+Enter the command:
+	cabal install

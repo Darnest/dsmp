@@ -44,6 +44,7 @@ class Entity entity where
 	entityBoundingBoxYDelta :: entity -> Double
 	entityBoundingBoxZDelta :: entity -> Double
 	toAnyEntity :: entity -> AnyEntity
+	setEntityPosition :: entity -> EntityPosition -> entity
 
 entityVector :: Entity entity => entity -> Vector3
 entityVector = entityPositionVector . entityPosition
@@ -108,6 +109,12 @@ instance Entity AnyEntity where
 	entityBoundingBoxXDelta = fmapAnyEntity entityBoundingBoxXDelta
 	entityBoundingBoxYDelta = fmapAnyEntity entityBoundingBoxYDelta
 	entityBoundingBoxZDelta = fmapAnyEntity entityBoundingBoxZDelta
+	
+	setEntityPosition (AnyEntityPlayer entity) = toAnyEntity . setEntityPosition entity
+	setEntityPosition (AnyEntityMob entity) = toAnyEntity . setEntityPosition entity
+	setEntityPosition (AnyEntityItem entity) = toAnyEntity . setEntityPosition entity
+	setEntityPosition (AnyEntityObject entity) = toAnyEntity . setEntityPosition entity
+
 	toAnyEntity = id
 
 data PlayerEntity = PlayerEntity
@@ -124,6 +131,7 @@ instance Entity PlayerEntity where
 	entityBoundingBoxYDelta = undefined
 	entityBoundingBoxZDelta = undefined
 	toAnyEntity = AnyEntityPlayer
+	setEntityPosition playerEntity position = playerEntity {playerEntityPosition = position}
 
 
 data MobEntity = MobEntity
@@ -140,6 +148,7 @@ instance Entity MobEntity where
 	entityBoundingBoxYDelta = undefined
 	entityBoundingBoxZDelta = undefined
 	toAnyEntity = AnyEntityMob
+	setEntityPosition mobEntity position = mobEntity {mobEntityPosition = position}
 
 
 data ItemEntity = ItemEntity
@@ -156,6 +165,7 @@ instance Entity ItemEntity where
 	entityBoundingBoxYDelta = undefined
 	entityBoundingBoxZDelta = undefined
 	toAnyEntity = AnyEntityItem
+	setEntityPosition itemEntity position = itemEntity {itemEntityPosition = position}
 
 
 data ObjectEntity = ObjectEntity
@@ -172,3 +182,4 @@ instance Entity ObjectEntity where
 	entityBoundingBoxYDelta = undefined
 	entityBoundingBoxZDelta = undefined
 	toAnyEntity = AnyEntityObject
+	setEntityPosition objectEntity position = objectEntity {objectEntityPosition = position}
