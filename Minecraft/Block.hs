@@ -280,6 +280,7 @@ blockFromId 81 _ = Cactus
 blockFromId 82 _ = Clay
 blockFromId 83 _ = Reed
 blockFromId 84 _ = Jukebox
+blockFromId _ _ = Air
 
 blockFromId_ :: Integral a => a -> Block
 blockFromId_ = flip blockFromId 0

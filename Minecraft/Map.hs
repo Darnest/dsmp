@@ -36,6 +36,7 @@ import Data.Int
 import Data.Bits
 import Data.Maybe
 import Debug.Trace
+import System.Random
 
 data MapBlockVector = MapBlockVector Int32 Int32 Int32
 	deriving (Eq, Show)
@@ -240,29 +241,23 @@ setMapBlock (MinecraftMap mapBlocks) blockVector
 		} = do
 	let
 		w = arrayIndex blockVector
-		i = w `quot` blocksInWord
-		d = w `rem` blocksInWord
 		b = (Block.blockId block) * 256
-		  + (fromIntegral lighting * 16)
+		  + ((fromIntegral lighting) * 16)
 		  + (Block.blockSecondaryData block)
-	Judy.adjust (\w -> w .&. (complement $ d * 255) .|. (d * b)) i mapBlocks
+	Judy.insert w b mapBlocks
 
 getExistingMapBlock :: MinecraftMap -> MapBlockVector -> IO (Maybe MapBlock)
 getExistingMapBlock (MinecraftMap mapBlocks) blockVector =
 	let
 		v = arrayIndex blockVector
-		i = v `quot` blocksInWord
-		d = v `rem` blocksInWord
 		in do
-			mw <- Judy.lookup i mapBlocks
+			mw <- Judy.lookup v mapBlocks
 			case mw of
 				(Just w) -> do
 					let
-						w = arrayIndex blockVector
-						b = (w `quot` d)
-						blockId = (b `quot` 256) .&. 0xFF
-						metadata = b .&. 0x0F
-						lighting = b .&. 0xF0
+						blockId = (w `quot` 256) .&. 0xFF
+						metadata = w .&. 0x0F
+						lighting = (w .&. 0xF0) `quot` 16
 					return $ Just MapBlock
 						{ mapBlockBlock = Block.blockFromId blockId metadata
 						, mapBlockLighting = fromIntegral lighting

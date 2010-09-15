@@ -90,7 +90,6 @@ instance ClientBehavior Client where
 		, clientDisconnectAction = dAction
 		} packet = do
 		succ <- lift $ writeSChan wChan packet
-		--lift $ putStrLn ("sent packet to wchan " ++ (take 1000 $ show packet))
 		if succ then
 				return ()
 			else do
@@ -104,7 +103,6 @@ instance ClientBehavior Client where
 		return ()
 		case mPacket of
 			(Just packet) -> do
-				--lift $ putStrLn $ "got packet from rchan: " ++ (show packet)
 				case packet of
 					(ClientPacket.Disconnect message) -> clientActionResultT (ClientDisconnected message)
 					_ -> return packet
@@ -118,22 +116,16 @@ instance ClientBehavior Client where
 		, clientDisconnectAction = mAction
 		} action = do
 			succ <- lift $ tryPutMVar mAction action
-			lift $ putStrLn "stopping client..."
 			if succ then do
 					lift $ do
 						forkIO $ do
-							putStrLn "closing wchan..."
 							closeSChan wChan
-							putStrLn "closed wchan..."
 							return ()
 						forkIO $ do
-							putStrLn "closing rchan..."
 							closeSChan rChan
-							putStrLn "closed rchan..."
 							return ()
 					failedClientActionResultT $ action
 				else do
-					lift $ putStrLn "failed to stop client"
 					disconnect <- lift $ readMVar mAction
 					failedClientActionResultT disconnect
 
@@ -161,18 +153,12 @@ instance ClientBehavior PlayerWorldClient where
 
 startClient :: Handle -> Network.HostName -> Network.PortNumber -> IO Client
 startClient handle hostName port = do
-	putStrLn "starting client..."
 	rChan <- newSChan
 	wChan <- newSChan
-	putStrLn "starting chans"
 	wChanContents <- getSChanContents wChan
-	putStrLn "starting chans 1"
 	forkIO $ hPutPackets handle wChanContents
-	putStrLn "starting chans 2"
 	packets <- hGetPackets handle
-	putStrLn "finished chans"
 	forkIO $ do
-		putStrLn "writing packets"
 		writeList2SChan rChan packets
 		return ()
 	
@@ -190,17 +176,16 @@ startClient handle hostName port = do
 authenticateClient :: String -> Client -> ClientAction PlayerClient
 authenticateClient serverId client = do
 	handshakePacket <- getNonPingPacket client
-	lift $ putStrLn "got handshake packet"
 	case handshakePacket of
 		(ClientPacket.Handshake hUsername) -> return ()
 		_ -> kickClient client "Unexpected data"
-	lift $ putStrLn ("sending handshake...")
+
 	sendPacket client ServerPacket.Handshake
 		{ ServerPacket.handshakeServerId = serverId
 		}
-	lift $ putStrLn "waiting for login"
+
 	loginPacket <- getNonPingPacket client
-	lift $ putStrLn "got login packet in authenticateClient"
+
 	(version, username, password) <-
 		case loginPacket of
 			(ClientPacket.Login version username password) -> return (version, username, password)
@@ -211,9 +196,15 @@ authenticateClient serverId client = do
 			kickClient client "Usupported protocol version"
 		else
 			return ()
-	lift $ putStrLn "verifying username"
+
+	lift $ forkIO $ do
+		runClientActionT $ do
+			lift $ threadDelay 5000000
+			sendPacket client $ ServerPacket.KeepAlive
+		return ()
+
 	mVerify <- lift $ verifyUsername serverId username
-	lift $ putStrLn "verifying username web query complete"
+
 	maybe
 		(kickClient client "Username does not verify")
 		(\b -> if b then
@@ -222,7 +213,7 @@ authenticateClient serverId client = do
 				kickClient client "Attempt to verify username failed"
 		)
 		mVerify
-	lift $ putStrLn "preparing to send login packet"
+
 	sendPacket client (ServerPacket.Login 0 "" "")
 	return PlayerClient
 		{ playerClientPlayer = Player
@@ -459,6 +450,7 @@ actPlayerWorldClient client@PlayerWorldClient
 											{ mapBlockBlock = block
 											, mapBlockLighting = 0x0F
 											}
+
 										sendPacket client $ encodeBlockChange blockVector block
 										return Nothing
 							Nothing -> return Nothing
@@ -493,16 +485,13 @@ startServer config@ServerConfig {serverConfigPort = port}
 		let server = (Server config socket wait serverId)
 		world <- newWorld
 		forkIO $ forever $ do
-			putStrLn "waiting for client"
 			(handle, hostName, port) <- Network.accept socket
 			hSetBuffering handle NoBuffering
-			putStrLn "accepted client"
 			forkIO $ do
 				runClientActionT $ do
 					client <- lift $ startClient handle hostName port :: ClientAction Client
 					playerClient <- authenticateClient serverId client
 					playerWorldClient <- sendClientWorld world playerClient
-					lift $ putStrLn "got world client"
 					actPlayerWorldClient playerWorldClient
 					return ()
 				return ()
